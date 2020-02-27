@@ -118,14 +118,23 @@ module emu
 	// 1 - D-/TX
 	// 2..6 - USR2..USR6
 	// Set USER_OUT to 1 to read from USER_IN.
-	input   [6:0] USER_IN,
-	output  [6:0] USER_OUT,
+	output	USER_OSD,
+	output	USER_MODE,
+	input	[7:0] USER_IN,
+	output	[7:0] USER_OUT,
 
 	input         OSD_STATUS
 );
 
 assign ADC_BUS  = 'Z;
-assign USER_OUT = '1;
+
+wire   joy_split, joy_mdsel;
+wire   [5:0] joy_in = {USER_IN[6],USER_IN[3],USER_IN[5],USER_IN[7],USER_IN[1],USER_IN[2]};
+assign USER_OUT  = |status[31:30] ? {3'b111,joy_split,3'b111,joy_mdsel} : '1;
+assign USER_MODE = |status[31:30] ;
+assign USER_OSD  = joydb9md_1[7] & joydb9md_1[5]; // A�adir esto para OSD
+
+
 assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = 0; 
 assign VGA_F1 = 0;
 
@@ -155,7 +164,9 @@ localparam CONF_STR1 = {
 	"FS,GBCGB ,Load ROM;",
 	"OEF,System,Auto,Gameboy,Gameboy Color;",
 	"-;",
-	"C,Cheats;"
+	"C,Cheats;",
+	"OUV,Serial SNAC DB9MD,Off,1 Player,2 Players;",
+	"-;",
 };
 
 localparam CONF_STR2 = {
@@ -215,7 +226,7 @@ wire [24:0] ioctl_addr;
 wire [15:0] ioctl_dout;
 reg         ioctl_wait;
 
-wire [15:0] joystick_0, joystick_1;
+wire [15:0] joystick_0_USB, joystick_1_USB;
 wire [15:0] joystick = joystick_0 | joystick_1;
 wire [7:0]  filetype;
 
@@ -232,6 +243,43 @@ wire        img_readonly;
 wire [63:0] img_size;
 
 wire [7:0] sav_char = sav_supported ? "R" : "+";
+
+wire [15:0] joystick_0 = |status[31:30] ? {
+	joydb9md_1[7], // Start		-> 7 * Start
+	joydb9md_1[8] | (joydb9md_1[7] & joydb9md_1[4]),// Select-> 6 * Mode or Start + B
+	joydb9md_1[4], // btn_fireB	-> 5 * B
+	joydb9md_1[6], // btn_fireA	-> 4 * A
+	joydb9md_1[3], // btn_up	-> 3 * U
+	joydb9md_1[2], // btn_down	-> 2 * D
+	joydb9md_1[1], // btn_left	-> 1 * L
+	joydb9md_1[0], // btn_righ	-> 0 * R 
+	} 
+	: joystick_0_USB;
+
+wire [15:0] joystick_1 =  status[31]    ? {
+	joydb9md_2[7], // Start		-> 7 * Start
+	joydb9md_2[8] | (joydb9md_2[7] & joydb9md_2[4]),// Select-> 6 * Mode or Start + B
+	joydb9md_2[4], // btn_fireB	-> 5 * B
+	joydb9md_2[6], // btn_fireA	-> 4 * A
+	joydb9md_2[3], // btn_up	-> 3 * U
+	joydb9md_2[2], // btn_down	-> 2 * D
+	joydb9md_2[1], // btn_left	-> 1 * L
+	joydb9md_2[0], // btn_righ	-> 0 * R 
+	} 
+	: status[30] ? joystick_0_USB : joystick_1_USB;
+
+
+reg [15:0] joydb9md_1,joydb9md_2;
+joy_db9md joy_db9md
+(
+  .clk       ( clk_sys    ), //35-50MHz
+  .joy_split ( joy_split  ),
+  .joy_mdsel ( joy_mdsel  ),
+  .joy_in    ( joy_in     ),
+  .joystick1 ( joydb9md_1 ),
+  .joystick2 ( joydb9md_2 )	  
+);
+
 
 hps_io #(.STRLEN(($size(CONF_STR1)>>3) + ($size(CONF_STR2)>>3) + ($size(CONF_STR3)>>3) + ($size(CONF_STR4)>>3) + ($size(CONF_STR5)>>3) + 4), .WIDE(1)) hps_io
 (
@@ -264,8 +312,9 @@ hps_io #(.STRLEN(($size(CONF_STR1)>>3) + ($size(CONF_STR2)>>3) + ($size(CONF_STR
 	.direct_video(direct_video),
 	.gamma_bus(gamma_bus),
 
-	.joystick_0(joystick_0),
-	.joystick_1(joystick_1)
+	.joystick_0(joystick_0_USB),
+	.joystick_1(joystick_1_USB),
+	.joy_raw({joydb9md_1[4],joydb9md_1[6],joydb9md_1[3:0]}), //Menu Dirs, A:Action B:Back (OSD)
 );
 
 ///////////////////////////////////////////////////
